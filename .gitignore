@@ -1,0 +1,4 @@
+.pio
+.vscode
+header/config.h
+src/config.h
