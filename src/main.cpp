@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include <WiFiUdp.h>
+#ifdef ESP32
+#include <WiFi.h>
+#elif ESP8266
 #include <ESP8266WiFi.h>
+#endif
 
 #if __has_include("config.h")
 #include "config.h"
@@ -16,8 +20,12 @@
 #endif
 
 #define MAGIC_PACKET_SIZE 102
+#define WOL_PORT 9
 
-uint8_t esp_mac[WL_MAC_ADDR_LENGTH];
+#define print_enum(value) #value
+
+uint8_t esp_magic_packet[MAGIC_PACKET_SIZE];
+int current_match_index;
 WiFiUDP wifiUdp;
 os_timer_t *timer0_cfg = NULL;
 
@@ -25,66 +33,74 @@ void connect_wifi()
 {
   Serial.print("Connecting to Wlan:");
   WiFi.begin(WLAN_SSID, WLAN_PASSWORD);
-  Serial.println(WiFi.status());
+  Serial.println(print_enum(WiFi.status()));
 }
 
-void setButton(bool enable)
+void set_button(bool enable)
 {
   Serial.println(enable ? "Activating button" : "Deactivating button");
   digitalWrite(OUTPUT_PIN, enable ? HIGH : LOW);
 }
 
-void timerCallback(void *pArg)
+void timer_callback(void *pArg)
 {
-  setButton(false);
+  set_button(false);
+}
+
+void read_mac()
+{
+  uint8_t mac[WL_MAC_ADDR_LENGTH];
+  WiFi.macAddress(mac);
+  Serial.printf("Mac address: %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+  for (int i = 0; i < 6; i++)
+  {
+    esp_magic_packet[i] = 0xFF;
+  }
+  for (int i = 0; i < 16; i++)
+  {
+    memcpy(esp_magic_packet + 6 + (i * WL_MAC_ADDR_LENGTH), mac, WL_MAC_ADDR_LENGTH);
+  }
 }
 
 void setup()
 {
+  Serial.begin(9600);
   pinMode(OUTPUT_PIN, OUTPUT);
-  setButton(false);
-  wifiUdp.begin(7);
+  set_button(false);
+  wifiUdp.begin(WOL_PORT);
+  current_match_index = 0;
+  read_mac();
 
-  WiFi.macAddress(esp_mac);
-
-  os_timer_setfn(timer0_cfg, timerCallback, NULL);
-}
-
-bool wol_received()
-{
-  uint8_t magic_packet[MAGIC_PACKET_SIZE];
-  wifiUdp.readBytes(magic_packet, MAGIC_PACKET_SIZE);
-
-  int i;
-  for (i = 0; i < 6; i++)
-  {
-    if (magic_packet[i] != 0xFF)
-    {
-      return false;
-    }
-  }
-  for (; i < MAGIC_PACKET_SIZE; i++)
-  {
-    if (magic_packet[i] != esp_mac[i - 6])
-    {
-      return false;
-    }
-  }
-
-  Serial.println("Wol received");
-  return true;
+  os_timer_setfn(timer0_cfg, timer_callback, NULL);
 }
 
 void activate_power_button()
 {
-  setButton(true);
+  set_button(true);
   os_timer_arm(timer0_cfg, 1000, false);
 }
 
-bool wifi_connected_and_packets_available_and_wol_received() {
-  return WiFi.isConnected() 
-    && wifiUdp.available() >= MAGIC_PACKET_SIZE 
-    && wol_received();
+void process_byte(uint8_t byte)
+{
+  if (byte == esp_magic_packet[current_match_index])
+  {
+    current_match_index++;
+    if (current_match_index == MAGIC_PACKET_SIZE)
+    {
+      Serial.println("Wol received");
+      activate_power_button();
+      current_match_index = 0;
+    }
+  }
+  else if (byte == esp_magic_packet[0])
+  {
+    current_match_index = 1;
+  }
+  else
+  {
+    current_match_index = 0;
+  }
 }
 
 void loop()
@@ -94,8 +110,8 @@ void loop()
     connect_wifi();
   }
 
-  if (wifi_connected_and_packets_available_and_wol_received())
+  if (WiFi.isConnected() && wifiUdp.available())
   {
-    activate_power_button();
+    process_byte(wifiUdp.read());
   }
 }
