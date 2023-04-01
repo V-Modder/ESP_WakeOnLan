@@ -1,5 +1,5 @@
-//#define DEBUG_ESP_WIFI
-//#define DEBUG_ESP_PORT Serial
+// #define DEBUG_ESP_WIFI
+// #define DEBUG_ESP_PORT Serial
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
@@ -48,16 +48,16 @@ void blink_callback()
 Ticker timer(timer_callback, 2000, 1, MILLIS);
 Ticker timer_blink(blink_callback, 2000, 0, MILLIS);
 
-void on_wifi_connected(WiFiEventStationModeConnected wlan) {
+void on_wifi_connected(WiFiEventStationModeConnected wlan)
+{
   timer_blink.stop();
   digitalWrite(LED_BUILTIN, HIGH);
   Serial.printf(PSTR("[WLAN] Connected to: %s [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X]\n"), wlan.ssid, wlan.channel, wlan.bssid[0], wlan.bssid[1], wlan.bssid[2], wlan.bssid[3], wlan.bssid[4], wlan.bssid[5]);
 }
 
-void on_wifi_got_ip(WiFiEventStationModeGotIP event) {
-  Serial.print("[WLAN] Got ip: ");
-  event.ip.printTo(Serial);
-  Serial.println();
+void on_wifi_got_ip(WiFiEventStationModeGotIP event)
+{
+  Serial.printf(PSTR("[WLAN] Got ip: %s\n"), event.ip.toString().c_str());
 }
 
 void connect_wifi()
@@ -77,8 +77,7 @@ void read_mac()
 {
   uint8_t mac[WL_MAC_ADDR_LENGTH];
   WiFi.macAddress(mac);
-  Serial.print("[WLAN] Mac-address: ");
-  Serial.println(WiFi.macAddress());
+  Serial.printf(PSTR("[WLAN] Mac-address: %s\n"), WiFi.macAddress().c_str());
 
   for (int i = 0; i < 6; i++)
   {
@@ -99,54 +98,57 @@ void print_available_wlans()
   uint8_t *bssid;
   int32_t channel;
   bool hidden;
-  Serial.print("[WLAN] Wlans found:");
-  Serial.println(scanResult);
-  Serial.println("[WLAN] Available Wlans:");
-  for (int8_t i = 0; i < scanResult; i++)
+  Serial.printf(PSTR("[WLAN] Wlans found: %d\n"), scanResult);
+  if (scanResult > 0)
   {
-    WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel, hidden);
-    const bss_info *bssInfo = WiFi.getScanInfoByIndex(i);
-    String phyMode;
-    const char *wps = "";
-    if (bssInfo)
+    Serial.println("[WLAN] Available Wlans:");
+    for (int8_t i = 0; i < scanResult; i++)
     {
-      phyMode.reserve(12);
-      phyMode = F("802.11");
-      String slash;
-      if (bssInfo->phy_11b)
+      WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel, hidden);
+      const bss_info *bssInfo = WiFi.getScanInfoByIndex(i);
+      String phyMode;
+      const char *wps = "";
+      if (bssInfo)
       {
-        phyMode += 'b';
-        slash = '/';
+        phyMode.reserve(12);
+        phyMode = F("802.11");
+        String slash;
+        if (bssInfo->phy_11b)
+        {
+          phyMode += 'b';
+          slash = '/';
+        }
+        if (bssInfo->phy_11g)
+        {
+          phyMode += slash + 'g';
+          slash = '/';
+        }
+        if (bssInfo->phy_11n)
+        {
+          phyMode += slash + 'n';
+        }
+        if (bssInfo->wps)
+        {
+          wps = PSTR("WPS");
+        }
       }
-      if (bssInfo->phy_11g)
-      {
-        phyMode += slash + 'g';
-        slash = '/';
-      }
-      if (bssInfo->phy_11n)
-      {
-        phyMode += slash + 'n';
-      }
-      if (bssInfo->wps)
-      {
-        wps = PSTR("WPS");
-      }
+      Serial.printf(PSTR("[WLAN]   %02d: [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X] %ddBm %c %c %-11s %3S %s\n"), i, channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], rssi, (encryptionType == ENC_TYPE_NONE) ? ' ' : '*', hidden ? 'H' : 'V', phyMode.c_str(), wps, ssid.c_str());
     }
-    Serial.printf(PSTR("[WLAN]   %02d: [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X] %ddBm %c %c %-11s %3S %s\n"), i, channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], rssi, (encryptionType == ENC_TYPE_NONE) ? ' ' : '*', hidden ? 'H' : 'V', phyMode.c_str(), wps, ssid.c_str());
   }
 }
 
 void setup()
 {
   Serial.begin(115200);
-  while (!Serial || !Serial.availableForWrite());
+  while (!Serial || !Serial.availableForWrite())
+    ;
   Serial.flush();
   Serial.println("\nStarting");
   pinMode(OUTPUT_PIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
   set_button(false);
-  
+
   wifiUdp.begin(WOL_PORT);
   read_mac();
   print_available_wlans();
