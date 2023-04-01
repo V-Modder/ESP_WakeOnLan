@@ -2,7 +2,11 @@
 // #define DEBUG_ESP_PORT Serial
 
 #include <Arduino.h>
+#ifdef ESP8266
 #include <ESP8266WiFi.h>
+#elif defined(ESP32)
+#include <WiFi.h>
+#endif
 #include <WiFiUdp.h>
 #include <Ticker.h>
 
