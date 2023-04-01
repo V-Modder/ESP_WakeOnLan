@@ -9,6 +9,9 @@
 #endif
 #include <WiFiUdp.h>
 #include <Ticker.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 
 #if __has_include("config.h")
 #include "config.h"
@@ -31,6 +34,7 @@
 
 uint8_t esp_magic_packet[MAGIC_PACKET_SIZE];
 WiFiUDP wifiUdp;
+AsyncWebServer server(80);
 
 void set_button(bool enable)
 {
@@ -71,6 +75,7 @@ void connect_wifi()
   WiFi.disconnect();
   WiFi.setHostname(HOSTNAME);
   WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
   timer_blink.start();
   Serial.printf(PSTR("[WLAN] Connecting to Wlan: %s\n"), WLAN_SSID);
   WiFi.setAutoReconnect(true);
@@ -144,8 +149,7 @@ void print_available_wlans()
 void setup()
 {
   Serial.begin(115200);
-  while (!Serial || !Serial.availableForWrite())
-    ;
+  while (!Serial || !Serial.availableForWrite());
   Serial.flush();
   Serial.println("\nStarting");
   pinMode(OUTPUT_PIN, OUTPUT);
@@ -153,11 +157,18 @@ void setup()
   digitalWrite(LED_BUILTIN, LOW);
   set_button(false);
 
-  wifiUdp.begin(WOL_PORT);
   read_mac();
   print_available_wlans();
 
   connect_wifi();
+  
+  wifiUdp.begin(WOL_PORT);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Hi! I am ESP8266.");
+  });
+
+  AsyncElegantOTA.begin(&server);
+  server.begin();
 }
 
 void activate_power_button()
