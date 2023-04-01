@@ -54,13 +54,13 @@ Ticker timer_blink(blink_callback, 2000, 0, MILLIS);
 
 void on_wifi_connected(WiFiEventStationModeConnected wlan)
 {
-  timer_blink.stop();
-  digitalWrite(LED_BUILTIN, HIGH);
   Serial.printf(PSTR("[WLAN] Connected to: %s [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X]\n"), wlan.ssid, wlan.channel, wlan.bssid[0], wlan.bssid[1], wlan.bssid[2], wlan.bssid[3], wlan.bssid[4], wlan.bssid[5]);
 }
 
 void on_wifi_got_ip(WiFiEventStationModeGotIP event)
 {
+  timer_blink.stop();
+  digitalWrite(LED_BUILTIN, HIGH);
   Serial.printf(PSTR("[WLAN] Got ip: %s\n"), event.ip.toString().c_str());
 }
 
