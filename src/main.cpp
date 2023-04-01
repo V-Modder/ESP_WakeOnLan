@@ -1,10 +1,10 @@
+//#define DEBUG_ESP_WIFI
+//#define DEBUG_ESP_PORT Serial
+
 #include <Arduino.h>
-#include <WiFiUdp.h>
-#ifdef ESP32
-#include <WiFi.h>
-#elif ESP8266
 #include <ESP8266WiFi.h>
-#endif
+#include <WiFiUdp.h>
+#include <Ticker.h>
 
 #if __has_include("config.h")
 #include "config.h"
@@ -16,42 +16,69 @@
 #define WLAN_PASSWORD ""
 #endif
 #ifndef OUTPUT_PIN
-#define OUTPUT_PIN 1
+#define OUTPUT_PIN D4
+#endif
+#ifndef HOSTNAME
+#define HOSTNAME ""
 #endif
 
 #define MAGIC_PACKET_SIZE 102
 #define WOL_PORT 9
 
-#define print_enum(value) #value
-
 uint8_t esp_magic_packet[MAGIC_PACKET_SIZE];
-int current_match_index;
 WiFiUDP wifiUdp;
-os_timer_t *timer0_cfg = NULL;
-
-void connect_wifi()
-{
-  Serial.print("Connecting to Wlan:");
-  WiFi.begin(WLAN_SSID, WLAN_PASSWORD);
-  Serial.println(print_enum(WiFi.status()));
-}
 
 void set_button(bool enable)
 {
-  Serial.println(enable ? "Activating button" : "Deactivating button");
-  digitalWrite(OUTPUT_PIN, enable ? HIGH : LOW);
+  digitalWrite(OUTPUT_PIN, enable ? LOW : HIGH);
+  digitalWrite(LED_BUILTIN, enable ? LOW : HIGH);
+  Serial.println(enable ? "[Relay] Activating button" : "[Relay] Deactivating button");
 }
 
-void timer_callback(void *pArg)
+void timer_callback()
 {
   set_button(false);
+}
+
+void blink_callback()
+{
+  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+}
+
+Ticker timer(timer_callback, 2000, 1, MILLIS);
+Ticker timer_blink(blink_callback, 2000, 0, MILLIS);
+
+void on_wifi_connected(WiFiEventStationModeConnected wlan) {
+  timer_blink.stop();
+  digitalWrite(LED_BUILTIN, HIGH);
+  Serial.printf(PSTR("[WLAN] Connected to: %s [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X]\n"), wlan.ssid, wlan.channel, wlan.bssid[0], wlan.bssid[1], wlan.bssid[2], wlan.bssid[3], wlan.bssid[4], wlan.bssid[5]);
+}
+
+void on_wifi_got_ip(WiFiEventStationModeGotIP event) {
+  Serial.print("[WLAN] Got ip: ");
+  event.ip.printTo(Serial);
+  Serial.println();
+}
+
+void connect_wifi()
+{
+  WiFi.onStationModeConnected(on_wifi_connected);
+  WiFi.onStationModeGotIP(on_wifi_got_ip);
+  WiFi.disconnect();
+  WiFi.setHostname(HOSTNAME);
+  WiFi.persistent(false);
+  timer_blink.start();
+  Serial.printf(PSTR("[WLAN] Connecting to Wlan: %s\n"), WLAN_SSID);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WLAN_SSID, WLAN_PASSWORD);
 }
 
 void read_mac()
 {
   uint8_t mac[WL_MAC_ADDR_LENGTH];
   WiFi.macAddress(mac);
-  Serial.printf("Mac address: %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  Serial.print("[WLAN] Mac-address: ");
+  Serial.println(WiFi.macAddress());
 
   for (int i = 0; i < 6; i++)
   {
@@ -63,55 +90,106 @@ void read_mac()
   }
 }
 
+void print_available_wlans()
+{
+  int scanResult = WiFi.scanNetworks();
+  String ssid;
+  int32_t rssi;
+  uint8_t encryptionType;
+  uint8_t *bssid;
+  int32_t channel;
+  bool hidden;
+  Serial.print("[WLAN] Wlans found:");
+  Serial.println(scanResult);
+  Serial.println("[WLAN] Available Wlans:");
+  for (int8_t i = 0; i < scanResult; i++)
+  {
+    WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel, hidden);
+    const bss_info *bssInfo = WiFi.getScanInfoByIndex(i);
+    String phyMode;
+    const char *wps = "";
+    if (bssInfo)
+    {
+      phyMode.reserve(12);
+      phyMode = F("802.11");
+      String slash;
+      if (bssInfo->phy_11b)
+      {
+        phyMode += 'b';
+        slash = '/';
+      }
+      if (bssInfo->phy_11g)
+      {
+        phyMode += slash + 'g';
+        slash = '/';
+      }
+      if (bssInfo->phy_11n)
+      {
+        phyMode += slash + 'n';
+      }
+      if (bssInfo->wps)
+      {
+        wps = PSTR("WPS");
+      }
+    }
+    Serial.printf(PSTR("[WLAN]   %02d: [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X] %ddBm %c %c %-11s %3S %s\n"), i, channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], rssi, (encryptionType == ENC_TYPE_NONE) ? ' ' : '*', hidden ? 'H' : 'V', phyMode.c_str(), wps, ssid.c_str());
+  }
+}
+
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  while (!Serial || !Serial.availableForWrite());
+  Serial.flush();
+  Serial.println("\nStarting");
   pinMode(OUTPUT_PIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
   set_button(false);
+  
   wifiUdp.begin(WOL_PORT);
-  current_match_index = 0;
   read_mac();
+  print_available_wlans();
 
-  os_timer_setfn(timer0_cfg, timer_callback, NULL);
+  connect_wifi();
 }
 
 void activate_power_button()
 {
   set_button(true);
-  os_timer_arm(timer0_cfg, 1000, false);
+  timer.start();
 }
 
-void process_byte(uint8_t byte)
+bool packet_matches(uint8_t *new_packet)
 {
-  if (byte == esp_magic_packet[current_match_index])
+  for (int i = 0; i < MAGIC_PACKET_SIZE; i++)
   {
-    current_match_index++;
-    if (current_match_index == MAGIC_PACKET_SIZE)
+    if (new_packet[i] != esp_magic_packet[i])
     {
-      Serial.println("Wol received");
-      activate_power_button();
-      current_match_index = 0;
+      return false;
     }
   }
-  else if (byte == esp_magic_packet[0])
+  return true;
+}
+
+void process_packet()
+{
+  uint8_t new_packet[MAGIC_PACKET_SIZE];
+  wifiUdp.read(new_packet, MAGIC_PACKET_SIZE);
+
+  if (packet_matches(new_packet))
   {
-    current_match_index = 1;
-  }
-  else
-  {
-    current_match_index = 0;
+    Serial.println("[Wol] received");
+    activate_power_button();
   }
 }
 
 void loop()
 {
-  if (!WiFi.isConnected())
+  if (WiFi.isConnected() && wifiUdp.parsePacket() == MAGIC_PACKET_SIZE)
   {
-    connect_wifi();
+    process_packet();
   }
-
-  if (WiFi.isConnected() && wifiUdp.available())
-  {
-    process_byte(wifiUdp.read());
-  }
+  timer.update();
+  timer_blink.update();
 }
