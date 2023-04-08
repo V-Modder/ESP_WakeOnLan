@@ -1,6 +1,3 @@
-// #define DEBUG_ESP_WIFI
-// #define DEBUG_ESP_PORT Serial
-
 #include <Arduino.h>
 #ifdef ESP8266
 #include <ESP8266WiFi.h>
@@ -17,17 +14,25 @@
 #include "config.h"
 #endif
 #ifndef WLAN_SSID
-#define WLAN_SSID ""
+#define WLAN_SSID "Whormhole"
 #endif
 #ifndef WLAN_PASSWORD
-#define WLAN_PASSWORD ""
+#define WLAN_PASSWORD "JRZCHCBQHSNQYN2PL7QZ"
 #endif
 #ifndef OUTPUT_PIN
-#define OUTPUT_PIN D4
+#define OUTPUT_PIN D5
 #endif
 #ifndef HOSTNAME
-#define HOSTNAME ""
+#define HOSTNAME "NAS-WOL"
 #endif
+#ifndef OTA_USERNAME
+#define OTA_USERNAME ""
+#endif
+#ifndef OTA_PASSWORD
+#define OTA_PASSWORD ""
+#endif
+
+#include "version.h"
 
 #define MAGIC_PACKET_SIZE 102
 #define WOL_PORT 9
@@ -58,28 +63,42 @@ Ticker timer_blink(blink_callback, 2000, 0, MILLIS);
 
 void on_wifi_connected(WiFiEventStationModeConnected wlan)
 {
-  Serial.printf(PSTR("[WLAN] Connected to: %s [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X]\n"), wlan.ssid, wlan.channel, wlan.bssid[0], wlan.bssid[1], wlan.bssid[2], wlan.bssid[3], wlan.bssid[4], wlan.bssid[5]);
+  Serial.printf(PSTR("[WLAN] Connected to: %s [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X]\n"), wlan.ssid.c_str(), wlan.channel, wlan.bssid[0], wlan.bssid[1], wlan.bssid[2], wlan.bssid[3], wlan.bssid[4], wlan.bssid[5]);
 }
 
 void on_wifi_got_ip(WiFiEventStationModeGotIP event)
 {
   timer_blink.stop();
   digitalWrite(LED_BUILTIN, HIGH);
-  Serial.printf(PSTR("[WLAN] Got ip: %s\n"), event.ip.toString().c_str());
+  Serial.printf(PSTR("[WLAN] Got ip: ip=%s, mask=%s, gateway=%s\n"), event.ip.toString().c_str(), event.mask.toString().c_str(), event.gw.toString().c_str());
+}
+
+String get_auth(uint8 mode) {
+  switch(mode) {
+    case AUTH_OPEN: return "AUTH_OPEN";
+    case AUTH_WEP: return "AUTH_WEP";
+    case AUTH_WPA_PSK: return "AUTH_WPA_PSK";
+    case AUTH_WPA2_PSK: return "AUTH_WPA2_PSK";
+    case AUTH_WPA_WPA2_PSK: return "AUTH_WPA_WPA2_PSK";
+    case AUTH_MAX: return "AUTH_MAX";
+    default: return "";
+  }
+}
+
+void on_auth_mode_changed(WiFiEventStationModeAuthModeChanged event) {
+  Serial.printf(PSTR("[WLAN] Auth mode changed: oldmode=(%d)%s, newmode=(%d)%s\n"), event.oldMode, get_auth(event.oldMode).c_str(), event.newMode, get_auth(event.newMode).c_str());
 }
 
 void connect_wifi()
 {
   WiFi.onStationModeConnected(on_wifi_connected);
   WiFi.onStationModeGotIP(on_wifi_got_ip);
+  WiFi.onStationModeAuthModeChanged(on_auth_mode_changed);
   WiFi.disconnect();
-  WiFi.setHostname(HOSTNAME);
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  timer_blink.start();
-  Serial.printf(PSTR("[WLAN] Connecting to Wlan: %s\n"), WLAN_SSID);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WLAN_SSID, WLAN_PASSWORD);
+  WiFi.hostname(HOSTNAME);
+  Serial.print("[WLAN] Connecting to Wlan: ");
+  Serial.println(WLAN_SSID);
+  WiFi.begin(String(WLAN_SSID).c_str(), String(WLAN_PASSWORD).c_str());
 }
 
 void read_mac()
@@ -114,36 +133,17 @@ void print_available_wlans()
     for (int8_t i = 0; i < scanResult; i++)
     {
       WiFi.getNetworkInfo(i, ssid, encryptionType, rssi, bssid, channel, hidden);
-      const bss_info *bssInfo = WiFi.getScanInfoByIndex(i);
-      String phyMode;
-      const char *wps = "";
-      if (bssInfo)
-      {
-        phyMode.reserve(12);
-        phyMode = F("802.11");
-        String slash;
-        if (bssInfo->phy_11b)
-        {
-          phyMode += 'b';
-          slash = '/';
-        }
-        if (bssInfo->phy_11g)
-        {
-          phyMode += slash + 'g';
-          slash = '/';
-        }
-        if (bssInfo->phy_11n)
-        {
-          phyMode += slash + 'n';
-        }
-        if (bssInfo->wps)
-        {
-          wps = PSTR("WPS");
-        }
-      }
-      Serial.printf(PSTR("[WLAN]   %02d: [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X] %ddBm %c %c %-11s %3S %s\n"), i, channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], rssi, (encryptionType == ENC_TYPE_NONE) ? ' ' : '*', hidden ? 'H' : 'V', phyMode.c_str(), wps, ssid.c_str());
+      Serial.printf(PSTR("[WLAN]   %02d: [CH %02d] [%02X:%02X:%02X:%02X:%02X:%02X] %ddBm %c %c %s\n"), i, channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], rssi, (encryptionType == ENC_TYPE_NONE) ? ' ' : '*', hidden ? 'H' : 'V', ssid.c_str());
     }
   }
+}
+
+String get_state() 
+{
+  int state = digitalRead(OUTPUT_PIN);
+  char json[15];
+  sprintf(json, PSTR("{state:%d}"), state);
+  return String(json);
 }
 
 void setup()
@@ -159,15 +159,18 @@ void setup()
 
   read_mac();
   print_available_wlans();
-
   connect_wifi();
   
   wifiUdp.begin(WOL_PORT);
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! I am ESP8266.");
+    request->send(200, "text/plain", String("Hi! I am ESP8266. ") + VERSION_STR);
+  });
+  server.on("/state", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", get_state());
   });
 
-  AsyncElegantOTA.begin(&server);
+  AsyncElegantOTA.setID(VERSION_STR);
+  AsyncElegantOTA.begin(&server, OTA_USERNAME, OTA_PASSWORD);
   server.begin();
 }
 
