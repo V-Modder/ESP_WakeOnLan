@@ -14,10 +14,10 @@
 #include "config.h"
 #endif
 #ifndef WLAN_SSID
-#define WLAN_SSID "Whormhole"
+#define WLAN_SSID ""
 #endif
 #ifndef WLAN_PASSWORD
-#define WLAN_PASSWORD "JRZCHCBQHSNQYN2PL7QZ"
+#define WLAN_PASSWORD ""
 #endif
 #ifndef OUTPUT_PIN
 #define OUTPUT_PIN D5
