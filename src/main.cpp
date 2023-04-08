@@ -140,9 +140,9 @@ void print_available_wlans()
 
 String get_state() 
 {
-  int state = digitalRead(OUTPUT_PIN);
+  int state = digitalRead(OUTPUT_PIN) == 0 ? 1 : 0;
   char json[15];
-  sprintf(json, PSTR("{state:%d}"), state);
+  sprintf(json, PSTR("{\"state\":%d}"), state);
   return String(json);
 }
 
