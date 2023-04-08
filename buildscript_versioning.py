@@ -19,7 +19,7 @@ hf = """
 #define VERSION "{}"
 #define BUILD_NUMBER "{}"
 #define VERSION_STR "v" VERSION "#" BUILD_NUMBER
-""".format(build_no, version)
+""".format(version, build_no)
 
 with open(FILENAME_VERSION_H, 'w+') as f:
     f.write(hf)
